@@ -73,13 +73,16 @@ type (
 	}
 )
 
+// Convert a 0mq error into a string
 func (this ZError) String() string {
 	return C.GoString(C.zmq_strerror(this.n))
 }
+// Return the last error as an os error
 func error() os.Error {
 	errnum := C.zmq_errno()
 	return ZError{errnum}
 }
+// Handles a return value returning the error or nil
 func handle(retval C.int) os.Error {
 	if retval == C.int(0) {
 		return nil
@@ -106,6 +109,10 @@ func Init(io_threads int) (ZContext, os.Error) {
 	}
 	return ZContext{ptr}, nil
 }
+func Message() ZMessage {
+	var m C.zmq_msg_t
+	return ZMessage{&m}
+}
 func MessageClose(message ZMessage) os.Error {
 	return handle(C.zmq_msg_close(message.Ptr))
 }
@@ -115,7 +122,9 @@ func MessageCopy(dest ZMessage, src ZMessage) os.Error {
 func MessageData(message ZMessage) ZMessageData {
 	return ZMessageData{C.zmq_msg_data(message.Ptr)}
 }
-//zmq_msg_init_data
+func MessageInitData(message ZMessage, data []byte) os.Error {
+	return handle(C.zmq_msg_init_data(message.Ptr, unsafe.Pointer(&data[0]), C.size_t(len(data)), nil, nil))
+}
 func MessageInitSize(message ZMessage, size int) os.Error {
 	return handle(C.zmq_msg_init_size(message.Ptr, C.size_t(size)))
 }
@@ -131,13 +140,23 @@ func MessageSize(message ZMessage) int {
 //func Poll(items []*PollItem, timeout int64) os.Error {
 //	return handle(C.zmq_poll(
 //}
-func Receive(socket ZSocket, message ZMessage, flags int) os.Error {
+func Recv(socket ZSocket, message ZMessage, flags int) os.Error {
 	return handle(C.zmq_recv(socket.Ptr, message.Ptr, C.int(flags)))
 }
 func Send(socket ZSocket, message ZMessage, flags int) os.Error {
 	return handle(C.zmq_send(socket.Ptr, message.Ptr, C.int(flags)))
 }
 // SetSocketOption
+func SetSocketOptionString(socket ZSocket, option_name int, option_value string) os.Error {
+	bs := []byte(option_value)
+	n := C.int(option_name)
+	sz := C.size_t(len(option_value))
+	var addr unsafe.Pointer
+	if len(bs) > 0 {
+		addr = unsafe.Pointer(&bs[0])
+	}
+	return handle(C.zmq_setsockopt(socket.Ptr, n, addr, sz))
+}
 func Socket(context ZContext, socketType int) (ZSocket, os.Error) {
 	ptr := C.zmq_socket(context.Ptr, C.int(socketType))
 	if ptr == nil {
@@ -154,4 +173,30 @@ func Version() (int, int, int) {
 	var patch C.int
 	C.zmq_version(&major, &minor, &patch)
 	return int(major), int(minor), int(patch)
+}
+
+
+// Higher level API
+func (this ZSocket) Send(data []byte, flags int) os.Error {
+	msg := Message()
+	defer MessageClose(msg)
+	MessageInitData(msg, data)
+	e := Send(this, msg, flags)
+	return e
+}
+func (this ZSocket) Recv(flags int, handler func([]byte)) os.Error {
+	msg := Message()
+	defer MessageClose(msg)
+	MessageInit(msg)
+	e := Recv(this, msg, flags)
+	if e != nil {
+		return e
+	}
+	s := MessageSize(msg)
+	// This converts a pointer to a c array, into a byte slice
+	// without copying any data
+	var b []byte
+	b = (*[1<<30]byte)(MessageData(msg).Ptr)[0:s]
+	handler(b)
+	return nil
 }
