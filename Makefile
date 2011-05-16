@@ -1,6 +1,6 @@
 include $(GOROOT)/src/Make.inc
 
-TARG=badgerodon/zmq
+TARG=github.com/badgerodon/zmq
 CGOFILES=zmq.go
 CGO_CFLAGS=-I. -I"$(GOROOT)/include" -I/usr/local/include
 CGO_LDFLAGS=-lzmq
